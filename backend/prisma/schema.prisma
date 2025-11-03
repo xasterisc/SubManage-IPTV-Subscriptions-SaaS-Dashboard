@@ -1,0 +1,107 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      Role     @default(SUPPORT)
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  createdSubscriptions Subscriber[] @relation("CreatedBy")
+  auditLogs            AuditLog[]
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SUPPORT
+}
+
+model Subscriber {
+  id          String   @id @default(cuid())
+  fullName    String
+  email       String   @unique
+  phoneNumber String   // E.164 format
+  plan        Plan
+  startDate   DateTime
+  endDate     DateTime
+  status      SubscriberStatus
+  notes       String?
+  
+  createdBy   User     @relation("CreatedBy", fields: [createdById], references: [id])
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments       Payment[]
+  communications Communication[]
+  auditLogs      AuditLog[]
+
+  @@index([endDate])
+  @@index([status])
+}
+
+enum Plan {
+  ONE_MONTH
+  THREE_MONTHS
+  SIX_MONTHS
+  ONE_YEAR
+}
+
+enum SubscriberStatus {
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  CANCELLED
+  TRIAL
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  transactionId String?  @unique
+  amount        Float
+  currency      String
+  paidAt        DateTime
+  method        String
+  
+  subscriber    Subscriber @relation(fields: [subscriberId], references: [id])
+  subscriberId  String
+
+  createdAt DateTime @default(now())
+}
+
+model Communication {
+  id        String   @id @default(cuid())
+  timestamp DateTime
+  channel   String   // 'SMS', 'Email', 'Call'
+  message   String
+  status    String   // 'sent', 'delivered', 'failed'
+  
+  subscriber   Subscriber @relation(fields: [subscriberId], references: [id])
+  subscriberId String
+  
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  action    String
+  details   Json
+  
+  user         User       @relation(fields: [userId], references: [id])
+  userId       String
+  subscriber   Subscriber? @relation(fields: [subscriberId], references: [id])
+  subscriberId String?
+}
