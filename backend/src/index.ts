@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { PrismaClient, SubscriberStatus, Plan, Role } from '@prisma/client';
+import { PrismaClient, SubscriberStatus, Plan, Role, Subscriber } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -24,7 +24,7 @@ const reversePlanMap: { [key in Plan]: string } = {
     [Plan.ONE_YEAR]: '12m',
 };
 
-const transformSubscriberForClient = (subscriber: any) => {
+const transformSubscriberForClient = (subscriber: Subscriber) => {
     return {
         ...subscriber,
         plan: reversePlanMap[subscriber.plan] || subscriber.plan,
