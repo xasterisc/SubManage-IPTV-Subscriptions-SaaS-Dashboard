@@ -1,0 +1,5 @@
+{
+  "name": "SubManage: IPTV Subscriptions SaaS Dashboard",
+  "description": "A product specification and functional prototype for a SaaS dashboard to manage IPTV subscription customers. It includes subscriber management, billing tracking, communication tools, and reporting features.",
+  "requestFramePermissions": []
+}
