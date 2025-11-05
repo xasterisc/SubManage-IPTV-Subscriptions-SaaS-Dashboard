@@ -15,20 +15,24 @@ import SpecView from './components/SpecView';
 import { executiveSummary, prioritizedFeatures, mvpDefinition, dataModel, apiSpecification, integrations, securityAndCompliance, roadmap } from './constants/specData';
 import { GoogleGenAI } from '@google/genai';
 
-const planDurations: { [key: string]: number } = {
-    '1m': 30,
-    '3m': 90,
-    '6m': 180,
-    '12m': 365,
-};
+// --- STEP 3: Add a base URL for our API ---
+const API_BASE_URL = 'http://localhost:3001/api';
 
-const calculateEndDate = (startDate: string, plan: '1m' | '3m' | '6m' | '12m'): string => {
-    const sDate = new Date(startDate);
-    const eDate = new Date(sDate);
-    const duration = planDurations[plan] || 30;
-    eDate.setDate(eDate.getDate() + duration);
-    return eDate.toISOString();
-};
+// --- STEP 3: This function is no longer needed, the backend handles it ---
+// const planDurations: { [key: string]: number } = {
+//     '1m': 30,
+//     '3m': 90,
+//     '6m': 180,
+//     '12m': 365,
+// };
+
+// const calculateEndDate = (startDate: string, plan: '1m' | '3m' | '6m' | '12m'): string => {
+//     const sDate = new Date(startDate);
+//     const eDate = new Date(sDate);
+//     const duration = planDurations[plan] || 30;
+//     eDate.setDate(eDate.getDate() + duration);
+//     return eDate.toISOString();
+// };
 
 
 const App: React.FC = () => {
@@ -55,8 +59,8 @@ const App: React.FC = () => {
             setError(null);
             try {
                 const [subscribersRes, staffRes] = await Promise.all([
-                    fetch('http://localhost:3001/api/subscribers'),
-                    fetch('http://localhost:3001/api/staff')
+                    fetch(`${API_BASE_URL}/subscribers`),
+                    fetch(`${API_BASE_URL}/staff`)
                 ]);
 
                 if (!subscribersRes.ok || !staffRes.ok) {
@@ -110,59 +114,108 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Subscriber Handlers (These are still the old mock functions) ---
-    // --- We will replace these in STEP 3 ---
-    const handleAddSubscriber = (subscriber: Subscriber) => {
-        if (!currentUser) return; // Should not happen
-        const endDate = calculateEndDate(subscriber.startDate, subscriber.plan);
-        const newSubscriber: Subscriber = {
+    // --- Subscriber Handlers (These are now REAL API calls) ---
+    const handleAddSubscriber = async (subscriber: Subscriber) => {
+        if (!currentUser) return;
+        
+        // Backend calculates dates and sets creator ID
+        const subscriberData = {
             ...subscriber,
-            id: `sub_${Date.now()}`,
-            endDate,
-            createdBy: currentUser.name,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            communications: [],
-            payments: [],
+            createdById: currentUser.id, // We can send this
         };
-        // This is still the OLD way, only updating local state
-        setSubscribers(prev => [newSubscriber, ...prev]); 
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/subscribers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscriberData),
+            });
+            if (!res.ok) throw new Error('Failed to create subscriber.');
+            
+            const newSubscriber = await res.json();
+            setSubscribers(prev => [newSubscriber, ...prev]);
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
 
-    const handleUpdateSubscriber = (subscriber: Subscriber) => {
-        const endDate = calculateEndDate(subscriber.startDate, subscriber.plan);
-        const updatedSubscriber = {
-            ...subscriber,
-            endDate,
-            updatedAt: new Date().toISOString(),
-        };
-        // This is still the OLD way, only updating local state
-        setSubscribers(prev => prev.map(s => s.id === updatedSubscriber.id ? updatedSubscriber : s));
+    const handleUpdateSubscriber = async (subscriber: Subscriber) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/subscribers/${subscriber.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscriber),
+            });
+            if (!res.ok) throw new Error('Failed to update subscriber.');
+            
+            const updatedSubscriber = await res.json();
+            setSubscribers(prev => prev.map(s => s.id === updatedSubscriber.id ? updatedSubscriber : s));
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
     
-    const handleDeleteSubscribers = (ids: string[]) => {
-        // This is still the OLD way, only updating local state
-        setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
+    const handleDeleteSubscribers = async (ids: string[]) => {
+        try {
+            // Loop and send a DELETE request for each ID
+            // The backend API only supports one-by-one deletion
+            await Promise.all(ids.map(id => 
+                fetch(`${API_BASE_URL}/subscribers/${id}`, {
+                    method: 'DELETE',
+                })
+            ));
+            
+            // If all deletes succeeded, update the local state
+            setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
+        } catch (err: any) {
+            setError(`Failed to delete subscribers: ${err.message}`);
+        }
     };
     
-    // --- Staff Handlers (These are still the old mock functions) ---
-    // --- We will replace these in STEP 3 ---
-    const handleAddStaff = (staffMember: StaffUser) => {
-        const newStaff: StaffUser = {
-            ...staffMember,
-            id: `user_${Date.now()}`,
-            avatar: `https://i.pravatar.cc/150?u=${staffMember.email}`,
-            lastLogin: new Date().toISOString(),
-        };
-        setStaff(prev => [newStaff, ...prev]);
+    // --- Staff Handlers (These are now REAL API calls) ---
+    const handleAddStaff = async (staffMember: StaffUser) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/staff`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(staffMember),
+            });
+            if (!res.ok) throw new Error('Failed to add staff member.');
+
+            const newStaff = await res.json();
+            setStaff(prev => [newStaff, ...prev]);
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
 
-    const handleUpdateStaff = (staffMember: StaffUser) => {
-        setStaff(prev => prev.map(s => s.id === staffMember.id ? staffMember : s));
+    const handleUpdateStaff = async (staffMember: StaffUser) => {
+         try {
+            const res = await fetch(`${API_BASE_URL}/staff/${staffMember.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(staffMember),
+            });
+            if (!res.ok) throw new Error('Failed to update staff member.');
+            
+            const updatedStaff = await res.json();
+            setStaff(prev => prev.map(s => s.id === updatedStaff.id ? updatedStaff : s));
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
-    
-    const handleDeleteStaff = (id: string) => {
-        setStaff(prev => prev.filter(s => s.id !== id));
+
+    const handleDeleteStaff = async (id: string) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/staff/${id}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) throw new Error('Failed to delete staff member.');
+
+            setStaff(prev => prev.filter(s => s.id !== id));
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
 
     // --- Gemini AI Handler (with fix from STEP 1) ---
@@ -181,7 +234,8 @@ const App: React.FC = () => {
             return response.text;
         } catch (e) {
             console.error(e);
-            throw new Error("Failed to connect to the AI service. Please check your API key and try again.");
+            const error = e as Error; // --- SYNTAX FIX ---
+            throw new Error(`Failed to connect to the AI service: ${error.message}`);
         }
     };
 
@@ -193,7 +247,7 @@ const App: React.FC = () => {
         switch (view) {
             case 'dashboard': return <DashboardView 
                                         subscribers={subscribers} 
-                                        currentUser={currentUser!} // We know currentUser is not null here
+                                        currentUser={currentUser!}
                                         setView={setView}
                                         setFilter={setSubscriberFilter}
                                     />;
@@ -213,7 +267,7 @@ const App: React.FC = () => {
                                     onDelete={handleDeleteStaff}
                                   />;
             case 'settings': return <SettingsView />;
-            case 'profile': return <ProfileView currentUser={currentUser!} />; // We know currentUser is not null
+            case 'profile': return <ProfileView currentUser={currentUser!} />;
             case 'productSpec': return <SpecView data={executiveSummary} />;
             case 'mvp': return <SpecView data={{...prioritizedFeatures, ...mvpDefinition, title: "Features & MVP Definition"}} />;
             case 'dataModel': return <SpecView data={dataModel} />;
@@ -223,7 +277,7 @@ const App: React.FC = () => {
             case 'roadmap': return <SpecView data={roadmap} />;
             default: return <DashboardView 
                                 subscribers={subscribers} 
-                                currentUser={currentUser!} // We know currentUser is not null
+                                currentUser={currentUser!}
                                 setView={setView}
                                 setFilter={setSubscriberFilter}
                              />;
