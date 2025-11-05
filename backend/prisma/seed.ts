@@ -1,7 +1,6 @@
 import { PrismaClient, Plan, Role, SubscriberStatus } from '@prisma/client';
-// We are in /backend/prisma, so we need to go up two levels to get to the root
-import { SUBSCRIBERS_DATA, STAFF_USERS_DATA } from '../../constants/mockData';
-import { Subscriber, StaffUser, SubscriberStatus as FrontendSubscriberStatus, Role as FrontendRole } from '../../types'; // Import types for type safety
+import { SUBSCRIBERS_DATA, STAFF_USERS_DATA } from './mockData';
+import { Subscriber, StaffUser, SubscriberStatus as FrontendSubscriberStatus, Role as FrontendRole } from './types'; // Import types for type safety
 
 const prisma = new PrismaClient();
 
