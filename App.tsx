@@ -11,7 +11,7 @@ import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import SpecView from './components/SpecView';
 
-import { SUBSCRIBERS_DATA, STAFF_USERS_DATA } from './constants/mockData';
+// We no longer import mock data
 import { executiveSummary, prioritizedFeatures, mvpDefinition, dataModel, apiSpecification, integrations, securityAndCompliance, roadmap } from './constants/specData';
 import { GoogleGenAI } from '@google/genai';
 
@@ -36,14 +36,56 @@ const App: React.FC = () => {
     const [collapsed, setCollapsed] = useState(false);
     const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-    const [subscribers, setSubscribers] = useState<Subscriber[]>(SUBSCRIBERS_DATA);
-    const [staff, setStaff] = useState<StaffUser[]>(STAFF_USERS_DATA);
+    // --- STEP 2 FIX: Initialize with empty state, not mock data ---
+    const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
+    const [staff, setStaff] = useState<StaffUser[]>([]);
     const [subscriberFilter, setSubscriberFilter] = useState<SubscriberFilter>('all');
     
-    const [loading, setLoading] = useState(false);
+    // --- STEP 2 FIX: Start loading as true ---
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     
-    const currentUser = STAFF_USERS_DATA[0];
+    // --- STEP 2 FIX: currentUser is now state, starts as null ---
+    const [currentUser, setCurrentUser] = useState<StaffUser | null>(null);
+
+    // --- STEP 2 FIX: Fetch data from backend API ---
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const [subscribersRes, staffRes] = await Promise.all([
+                    fetch('http://localhost:3001/api/subscribers'),
+                    fetch('http://localhost:3001/api/staff')
+                ]);
+
+                if (!subscribersRes.ok || !staffRes.ok) {
+                    throw new Error('Failed to fetch data from the server. Is the backend running?');
+                }
+
+                const subscribersData = await subscribersRes.json();
+                const staffData = await staffRes.json();
+
+                setSubscribers(subscribersData);
+                setStaff(staffData);
+
+                // Set the current user to the first user in the staff list
+                if (staffData.length > 0) {
+                    setCurrentUser(staffData[0]);
+                } else {
+                    setError("No staff users found in the database. App cannot start.");
+                }
+
+            } catch (err: any) {
+                setError(err.message);
+                console.error("Fetch error:", err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, []); // The empty array [] means this runs once on mount
 
     useEffect(() => {
         // Theme initialization
@@ -68,8 +110,10 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Subscriber Handlers ---
+    // --- Subscriber Handlers (These are still the old mock functions) ---
+    // --- We will replace these in STEP 3 ---
     const handleAddSubscriber = (subscriber: Subscriber) => {
+        if (!currentUser) return; // Should not happen
         const endDate = calculateEndDate(subscriber.startDate, subscriber.plan);
         const newSubscriber: Subscriber = {
             ...subscriber,
@@ -81,7 +125,8 @@ const App: React.FC = () => {
             communications: [],
             payments: [],
         };
-        setSubscribers(prev => [newSubscriber, ...prev]);
+        // This is still the OLD way, only updating local state
+        setSubscribers(prev => [newSubscriber, ...prev]); 
     };
 
     const handleUpdateSubscriber = (subscriber: Subscriber) => {
@@ -91,14 +136,17 @@ const App: React.FC = () => {
             endDate,
             updatedAt: new Date().toISOString(),
         };
+        // This is still the OLD way, only updating local state
         setSubscribers(prev => prev.map(s => s.id === updatedSubscriber.id ? updatedSubscriber : s));
     };
     
     const handleDeleteSubscribers = (ids: string[]) => {
+        // This is still the OLD way, only updating local state
         setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
     };
     
-    // --- Staff Handlers ---
+    // --- Staff Handlers (These are still the old mock functions) ---
+    // --- We will replace these in STEP 3 ---
     const handleAddStaff = (staffMember: StaffUser) => {
         const newStaff: StaffUser = {
             ...staffMember,
@@ -117,7 +165,7 @@ const App: React.FC = () => {
         setStaff(prev => prev.filter(s => s.id !== id));
     };
 
-    // --- Gemini AI Handler ---
+    // --- Gemini AI Handler (with fix from STEP 1) ---
     const handleSummarizeNotes = async (notes: string): Promise<string> => {
         if (!notes.trim()) {
             return "No notes provided to summarize.";
@@ -139,13 +187,13 @@ const App: React.FC = () => {
 
 
     const renderView = () => {
-        if (loading) return <div className="p-10 text-center">Loading data...</div>;
-        if (error) return <div className="p-10 text-center text-red-500 bg-red-100 dark:bg-red-900/50 border border-red-500 rounded-lg">{error}</div>;
+        // We can render views directly, since !currentUser is handled above
+        // The old loading/error checks are removed from here.
 
         switch (view) {
             case 'dashboard': return <DashboardView 
                                         subscribers={subscribers} 
-                                        currentUser={currentUser}
+                                        currentUser={currentUser!} // We know currentUser is not null here
                                         setView={setView}
                                         setFilter={setSubscriberFilter}
                                     />;
@@ -165,7 +213,7 @@ const App: React.FC = () => {
                                     onDelete={handleDeleteStaff}
                                   />;
             case 'settings': return <SettingsView />;
-            case 'profile': return <ProfileView currentUser={currentUser} />;
+            case 'profile': return <ProfileView currentUser={currentUser!} />; // We know currentUser is not null
             case 'productSpec': return <SpecView data={executiveSummary} />;
             case 'mvp': return <SpecView data={{...prioritizedFeatures, ...mvpDefinition, title: "Features & MVP Definition"}} />;
             case 'dataModel': return <SpecView data={dataModel} />;
@@ -175,11 +223,45 @@ const App: React.FC = () => {
             case 'roadmap': return <SpecView data={roadmap} />;
             default: return <DashboardView 
                                 subscribers={subscribers} 
-                                currentUser={currentUser}
+                                currentUser={currentUser!} // We know currentUser is not null
                                 setView={setView}
                                 setFilter={setSubscriberFilter}
                              />;
         }
+    }
+
+    // --- STEP 2 FIX: Handle loading, error, and null user states *before* rendering the app ---
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
+                <div className="text-xl font-medium text-slate-700 dark:text-slate-300">
+                    Loading Application...
+                </div>
+            </div>
+        );
+    }
+    
+    if (error) {
+       return (
+            <div className="flex items-center justify-center h-screen bg-red-100 dark:bg-red-900/50">
+                <div className="p-10 text-center text-red-500 border border-red-500 rounded-lg">
+                    <h2 className="text-2xl font-bold mb-4">Error</h2>
+                    <p>{error}</p>
+                    <p className="mt-4 text-sm">Please ensure the backend server is running on `http://localhost:3001`.</p>
+                </div>
+            </div>
+       );
+    }
+
+    if (!currentUser) {
+        // This should be caught by the error handler, but it's a good safeguard
+        return (
+             <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
+                <div className="text-xl font-medium text-red-700 dark:text-red-300">
+                    No current user could be loaded.
+                </div>
+            </div>
+        );
     }
 
     return (
