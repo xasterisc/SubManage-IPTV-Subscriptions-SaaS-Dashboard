@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import React, { useState, useEffect } from 'react';
 import { View, Subscriber, StaffUser, SubscriberFilter, SubscriberStatus } from './types';
 import Sidebar from './components/Sidebar';
@@ -122,7 +124,7 @@ const App: React.FC = () => {
         }
         
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
             const prompt = `Summarize these customer notes for a support agent in one or two sentences. Keep it concise and actionable:\n\n---\n${notes}\n---`;
             const response = await ai.models.generateContent({
               model: 'gemini-2.5-flash',

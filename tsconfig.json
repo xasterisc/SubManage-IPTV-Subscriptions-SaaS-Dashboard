@@ -17,5 +17,5 @@
     "jsx": "react-jsx"
   },
   "include": ["."],
-  "exclude": ["node_modules", "backend", "types/google-genai.d.ts"]
+  "exclude": ["node_modules", "backend"]
 }
