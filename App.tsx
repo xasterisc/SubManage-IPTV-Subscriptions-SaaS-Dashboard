@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Subscriber, StaffUser, SubscriberFilter, SubscriberStatus } from './types';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -11,48 +11,25 @@ import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import SpecView from './components/SpecView';
 
-// We no longer import mock data
 import { executiveSummary, prioritizedFeatures, mvpDefinition, dataModel, apiSpecification, integrations, securityAndCompliance, roadmap } from './constants/specData';
 import { GoogleGenAI } from '@google/genai';
 
-// --- STEP 3: Add a base URL for our API ---
 const API_BASE_URL = 'http://localhost:3001/api';
-
-// --- STEP 3: This function is no longer needed, the backend handles it ---
-// const planDurations: { [key: string]: number } = {
-//     '1m': 30,
-//     '3m': 90,
-//     '6m': 180,
-//     '12m': 365,
-// };
-
-// const calculateEndDate = (startDate: string, plan: '1m' | '3m' | '6m' | '12m'): string => {
-//     const sDate = new Date(startDate);
-//     const eDate = new Date(sDate);
-//     const duration = planDurations[plan] || 30;
-//     eDate.setDate(eDate.getDate() + duration);
-//     return eDate.toISOString();
-// };
-
 
 const App: React.FC = () => {
     const [view, setView] = useState<View>('dashboard');
     const [collapsed, setCollapsed] = useState(false);
     const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-    // --- STEP 2 FIX: Initialize with empty state, not mock data ---
     const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
     const [staff, setStaff] = useState<StaffUser[]>([]);
     const [subscriberFilter, setSubscriberFilter] = useState<SubscriberFilter>('all');
     
-    // --- STEP 2 FIX: Start loading as true ---
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     
-    // --- STEP 2 FIX: currentUser is now state, starts as null ---
     const [currentUser, setCurrentUser] = useState<StaffUser | null>(null);
 
-    // --- STEP 2 FIX: Fetch data from backend API ---
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
@@ -73,7 +50,6 @@ const App: React.FC = () => {
                 setSubscribers(subscribersData);
                 setStaff(staffData);
 
-                // Set the current user to the first user in the staff list
                 if (staffData.length > 0) {
                     setCurrentUser(staffData[0]);
                 } else {
@@ -114,14 +90,13 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Subscriber Handlers (These are now REAL API calls) ---
+    // --- Subscriber Handlers ---
     const handleAddSubscriber = async (subscriber: Subscriber) => {
         if (!currentUser) return;
         
-        // Backend calculates dates and sets creator ID
         const subscriberData = {
             ...subscriber,
-            createdById: currentUser.id, // We can send this
+            createdById: currentUser.id,
         };
 
         try {
@@ -157,22 +132,19 @@ const App: React.FC = () => {
     
     const handleDeleteSubscribers = async (ids: string[]) => {
         try {
-            // Loop and send a DELETE request for each ID
-            // The backend API only supports one-by-one deletion
             await Promise.all(ids.map(id => 
                 fetch(`${API_BASE_URL}/subscribers/${id}`, {
                     method: 'DELETE',
                 })
             ));
             
-            // If all deletes succeeded, update the local state
             setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
         } catch (err: any) {
             setError(`Failed to delete subscribers: ${err.message}`);
         }
     };
     
-    // --- Staff Handlers (These are now REAL API calls) ---
+    // --- Staff Handlers ---
     const handleAddStaff = async (staffMember: StaffUser) => {
         try {
             const res = await fetch(`${API_BASE_URL}/staff`, {
@@ -218,7 +190,7 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Gemini AI Handler (with fix from STEP 1) ---
+    // --- Gemini AI Handler ---
     const handleSummarizeNotes = async (notes: string): Promise<string> => {
         if (!notes.trim()) {
             return "No notes provided to summarize.";
@@ -234,15 +206,16 @@ const App: React.FC = () => {
             return response.text;
         } catch (e) {
             console.error(e);
-            const error = e as Error; // --- SYNTAX FIX ---
+            const error = e as Error;
             throw new Error(`Failed to connect to the AI service: ${error.message}`);
         }
     };
 
+    const expiringSubscribers = useMemo(() => {
+        return subscribers.filter(s => s.status === SubscriberStatus.Expiring);
+    }, [subscribers]);
 
     const renderView = () => {
-        // We can render views directly, since !currentUser is handled above
-        // The old loading/error checks are removed from here.
 
         switch (view) {
             case 'dashboard': return <DashboardView 
@@ -284,7 +257,6 @@ const App: React.FC = () => {
         }
     }
 
-    // --- STEP 2 FIX: Handle loading, error, and null user states *before* rendering the app ---
     if (loading) {
         return (
             <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
@@ -329,6 +301,8 @@ const App: React.FC = () => {
                         theme={theme}
                         currentUser={currentUser}
                         setView={setView}
+                        expiringSubscribers={expiringSubscribers}
+                        setSubscriberFilter={setSubscriberFilter}
                     />
                     <main>
                         <div className="mx-auto max-w-screen-2xl p-4 md:p-6 2xl:p-10">

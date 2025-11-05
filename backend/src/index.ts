@@ -24,10 +24,27 @@ const reversePlanMap: { [key in Plan]: string } = {
     [Plan.ONE_YEAR]: '12m',
 };
 
-const transformSubscriberForClient = (subscriber: Subscriber) => {
+const statusMap: { [key: string]: SubscriberStatus } = {
+    'Active': SubscriberStatus.ACTIVE,
+    'Expiring': SubscriberStatus.EXPIRING,
+    'Expired': SubscriberStatus.EXPIRED,
+    'Cancelled': SubscriberStatus.CANCELLED,
+    'Trial': SubscriberStatus.TRIAL,
+};
+
+const reverseStatusMap: { [key in SubscriberStatus]: string } = {
+    [SubscriberStatus.ACTIVE]: 'Active',
+    [SubscriberStatus.EXPIRING]: 'Expiring',
+    [SubscriberStatus.EXPIRED]: 'Expired',
+    [SubscriberStatus.CANCELLED]: 'Cancelled',
+    [SubscriberStatus.TRIAL]: 'Trial',
+};
+
+const transformSubscriberForClient = (subscriber: Subscriber & { payments: any[], communications: any[] }) => {
     return {
         ...subscriber,
         plan: reversePlanMap[subscriber.plan] || subscriber.plan,
+        status: reverseStatusMap[subscriber.status] || subscriber.status,
         startDate: subscriber.startDate.toISOString(),
         endDate: subscriber.endDate.toISOString(),
         createdAt: subscriber.createdAt.toISOString(),
@@ -35,14 +52,13 @@ const transformSubscriberForClient = (subscriber: Subscriber) => {
     };
 };
 
-
 // --- SUBSCRIBERS API ---
 
-// GET all subscribers
 app.get('/api/subscribers', async (req, res) => {
   try {
     const subscribers = await prisma.subscriber.findMany({
       orderBy: { createdAt: 'desc' },
+      include: { payments: true, communications: true }
     });
     res.json(subscribers.map(transformSubscriberForClient));
   } catch (error) {
@@ -50,15 +66,16 @@ app.get('/api/subscribers', async (req, res) => {
   }
 });
 
-// POST a new subscriber
 app.post('/api/subscribers', async (req, res) => {
   try {
-    const { fullName, email, phoneNumber, plan, startDate, status, notes } = req.body;
+    const { fullName, email, phoneNumber, plan, startDate, status, notes, createdById } = req.body;
     
     const planEnum = planMap[plan as string];
     if (!planEnum) {
         return res.status(400).json({ error: `Invalid plan value provided: ${plan}`});
     }
+
+    const statusEnum = statusMap[status as string] || SubscriberStatus.ACTIVE;
 
     const planDurations: { [key in Plan]: number } = { 
         [Plan.ONE_MONTH]: 30, 
@@ -79,10 +96,11 @@ app.post('/api/subscribers', async (req, res) => {
         plan: planEnum,
         startDate: sDate,
         endDate: eDate,
-        status: status as SubscriberStatus,
+        status: statusEnum,
         notes,
-        createdById: 'user_1', // Hardcoded admin user for now
+        createdById: createdById || 'user_1',
       },
+      include: { payments: true, communications: true }
     });
     res.status(201).json(transformSubscriberForClient(newSubscriber));
   } catch (error) {
@@ -91,7 +109,6 @@ app.post('/api/subscribers', async (req, res) => {
   }
 });
 
-// PUT (update) a subscriber
 app.put('/api/subscribers/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -101,6 +118,8 @@ app.put('/api/subscribers/:id', async (req, res) => {
      if (!planEnum) {
         return res.status(400).json({ error: `Invalid plan value provided: ${plan}`});
     }
+
+    const statusEnum = statusMap[status as string] || SubscriberStatus.ACTIVE;
 
     const planDurations: { [key in Plan]: number } = { 
         [Plan.ONE_MONTH]: 30, 
@@ -122,25 +141,24 @@ app.put('/api/subscribers/:id', async (req, res) => {
         plan: planEnum,
         startDate: sDate,
         endDate: eDate,
-        status: status as SubscriberStatus,
+        status: statusEnum,
         notes,
       },
+      include: { payments: true, communications: true }
     });
     res.json(transformSubscriberForClient(updatedSubscriber));
-  } catch (error)
-{
+  } catch (error) {
+    console.error(error);
     res.status(500).json({ error: 'Error updating subscriber' });
   }
 });
 
-// DELETE a subscriber
 app.delete('/api/subscribers/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    // To prevent errors, we first delete related records.
-    // In a real app, you might want soft deletes instead.
     await prisma.communication.deleteMany({ where: { subscriberId: id } });
     await prisma.payment.deleteMany({ where: { subscriberId: id } });
+    await prisma.auditLog.deleteMany({ where: { subscriberId: id }});
 
     await prisma.subscriber.delete({
       where: { id },
@@ -156,11 +174,10 @@ app.delete('/api/subscribers/:id', async (req, res) => {
 // --- STAFF API ---
 const transformUserForClient = (user: any) => ({
     ...user,
-    lastLogin: new Date().toISOString(), // Use a dynamic value for last login
+    lastLogin: new Date().toISOString(),
     avatar: user.avatar || `https://i.pravatar.cc/150?u=${user.email}`,
 });
 
-// GET all staff
 app.get('/api/staff', async (req, res) => {
   try {
     const staff = await prisma.user.findMany({
@@ -172,7 +189,6 @@ app.get('/api/staff', async (req, res) => {
   }
 });
 
-// POST a new staff member
 app.post('/api/staff', async (req, res) => {
   try {
     const { name, email, role } = req.body;
@@ -191,7 +207,6 @@ app.post('/api/staff', async (req, res) => {
   }
 });
 
-// PUT (update) a staff member
 app.put('/api/staff/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -211,15 +226,17 @@ app.put('/api/staff/:id', async (req, res) => {
 });
 
 
-// DELETE a staff member
 app.delete('/api/staff/:id', async (req, res) => {
     const { id } = req.params;
     try {
+        await prisma.auditLog.deleteMany({ where: { userId: id }});
+
         await prisma.user.delete({
             where: { id },
         });
         res.status(204).send();
     } catch (error) {
+        console.error(error);
         res.status(500).json({ error: 'Error deleting staff member. They may have created subscribers.' });
     }
 });
