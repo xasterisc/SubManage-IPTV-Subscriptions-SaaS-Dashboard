@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+/// <reference types="vite/client" />
+
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Subscriber, StaffUser, SubscriberFilter, SubscriberStatus } from './types';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -9,39 +11,61 @@ import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import SpecView from './components/SpecView';
 
-import { SUBSCRIBERS_DATA, STAFF_USERS_DATA } from './constants/mockData';
 import { executiveSummary, prioritizedFeatures, mvpDefinition, dataModel, apiSpecification, integrations, securityAndCompliance, roadmap } from './constants/specData';
 import { GoogleGenAI } from '@google/genai';
 
-const planDurations: { [key: string]: number } = {
-    '1m': 30,
-    '3m': 90,
-    '6m': 180,
-    '12m': 365,
-};
-
-const calculateEndDate = (startDate: string, plan: '1m' | '3m' | '6m' | '12m'): string => {
-    const sDate = new Date(startDate);
-    const eDate = new Date(sDate);
-    const duration = planDurations[plan] || 30;
-    eDate.setDate(eDate.getDate() + duration);
-    return eDate.toISOString();
-};
-
+const API_BASE_URL = 'http://localhost:3001/api';
 
 const App: React.FC = () => {
     const [view, setView] = useState<View>('dashboard');
     const [collapsed, setCollapsed] = useState(false);
     const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-    const [subscribers, setSubscribers] = useState<Subscriber[]>(SUBSCRIBERS_DATA);
-    const [staff, setStaff] = useState<StaffUser[]>(STAFF_USERS_DATA);
+    const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
+    const [staff, setStaff] = useState<StaffUser[]>([]);
     const [subscriberFilter, setSubscriberFilter] = useState<SubscriberFilter>('all');
     
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     
-    const currentUser = STAFF_USERS_DATA[0];
+    const [currentUser, setCurrentUser] = useState<StaffUser | null>(null);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const [subscribersRes, staffRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}/subscribers`),
+                    fetch(`${API_BASE_URL}/staff`)
+                ]);
+
+                if (!subscribersRes.ok || !staffRes.ok) {
+                    throw new Error('Failed to fetch data from the server. Is the backend running?');
+                }
+
+                const subscribersData = await subscribersRes.json();
+                const staffData = await staffRes.json();
+
+                setSubscribers(subscribersData);
+                setStaff(staffData);
+
+                if (staffData.length > 0) {
+                    setCurrentUser(staffData[0]);
+                } else {
+                    setError("No staff users found in the database. App cannot start.");
+                }
+
+            } catch (err: any) {
+                setError(err.message);
+                console.error("Fetch error:", err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, []); // The empty array [] means this runs once on mount
 
     useEffect(() => {
         // Theme initialization
@@ -67,52 +91,103 @@ const App: React.FC = () => {
     };
 
     // --- Subscriber Handlers ---
-    const handleAddSubscriber = (subscriber: Subscriber) => {
-        const endDate = calculateEndDate(subscriber.startDate, subscriber.plan);
-        const newSubscriber: Subscriber = {
+    const handleAddSubscriber = async (subscriber: Subscriber) => {
+        if (!currentUser) return;
+        
+        const subscriberData = {
             ...subscriber,
-            id: `sub_${Date.now()}`,
-            endDate,
-            createdBy: currentUser.name,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            communications: [],
-            payments: [],
+            createdById: currentUser.id,
         };
-        setSubscribers(prev => [newSubscriber, ...prev]);
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/subscribers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscriberData),
+            });
+            if (!res.ok) throw new Error('Failed to create subscriber.');
+            
+            const newSubscriber = await res.json();
+            setSubscribers(prev => [newSubscriber, ...prev]);
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
 
-    const handleUpdateSubscriber = (subscriber: Subscriber) => {
-        const endDate = calculateEndDate(subscriber.startDate, subscriber.plan);
-        const updatedSubscriber = {
-            ...subscriber,
-            endDate,
-            updatedAt: new Date().toISOString(),
-        };
-        setSubscribers(prev => prev.map(s => s.id === updatedSubscriber.id ? updatedSubscriber : s));
+    const handleUpdateSubscriber = async (subscriber: Subscriber) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/subscribers/${subscriber.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscriber),
+            });
+            if (!res.ok) throw new Error('Failed to update subscriber.');
+            
+            const updatedSubscriber = await res.json();
+            setSubscribers(prev => prev.map(s => s.id === updatedSubscriber.id ? updatedSubscriber : s));
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
     
-    const handleDeleteSubscribers = (ids: string[]) => {
-        setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
+    const handleDeleteSubscribers = async (ids: string[]) => {
+        try {
+            await Promise.all(ids.map(id => 
+                fetch(`${API_BASE_URL}/subscribers/${id}`, {
+                    method: 'DELETE',
+                })
+            ));
+            
+            setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
+        } catch (err: any) {
+            setError(`Failed to delete subscribers: ${err.message}`);
+        }
     };
     
     // --- Staff Handlers ---
-    const handleAddStaff = (staffMember: StaffUser) => {
-        const newStaff: StaffUser = {
-            ...staffMember,
-            id: `user_${Date.now()}`,
-            avatar: `https://i.pravatar.cc/150?u=${staffMember.email}`,
-            lastLogin: new Date().toISOString(),
-        };
-        setStaff(prev => [newStaff, ...prev]);
+    const handleAddStaff = async (staffMember: StaffUser) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/staff`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(staffMember),
+            });
+            if (!res.ok) throw new Error('Failed to add staff member.');
+
+            const newStaff = await res.json();
+            setStaff(prev => [newStaff, ...prev]);
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
 
-    const handleUpdateStaff = (staffMember: StaffUser) => {
-        setStaff(prev => prev.map(s => s.id === staffMember.id ? staffMember : s));
+    const handleUpdateStaff = async (staffMember: StaffUser) => {
+         try {
+            const res = await fetch(`${API_BASE_URL}/staff/${staffMember.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(staffMember),
+            });
+            if (!res.ok) throw new Error('Failed to update staff member.');
+            
+            const updatedStaff = await res.json();
+            setStaff(prev => prev.map(s => s.id === updatedStaff.id ? updatedStaff : s));
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
-    
-    const handleDeleteStaff = (id: string) => {
-        setStaff(prev => prev.filter(s => s.id !== id));
+
+    const handleDeleteStaff = async (id: string) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/staff/${id}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) throw new Error('Failed to delete staff member.');
+
+            setStaff(prev => prev.filter(s => s.id !== id));
+        } catch (err: any) {
+            setError(err.message);
+        }
     };
 
     // --- Gemini AI Handler ---
@@ -122,7 +197,7 @@ const App: React.FC = () => {
         }
         
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
             const prompt = `Summarize these customer notes for a support agent in one or two sentences. Keep it concise and actionable:\n\n---\n${notes}\n---`;
             const response = await ai.models.generateContent({
               model: 'gemini-2.5-flash',
@@ -131,19 +206,21 @@ const App: React.FC = () => {
             return response.text;
         } catch (e) {
             console.error(e);
-            throw new Error("Failed to connect to the AI service. Please check your API key and try again.");
+            const error = e as Error;
+            throw new Error(`Failed to connect to the AI service: ${error.message}`);
         }
     };
 
+    const expiringSubscribers = useMemo(() => {
+        return subscribers.filter(s => s.status === SubscriberStatus.Expiring);
+    }, [subscribers]);
 
     const renderView = () => {
-        if (loading) return <div className="p-10 text-center">Loading data...</div>;
-        if (error) return <div className="p-10 text-center text-red-500 bg-red-100 dark:bg-red-900/50 border border-red-500 rounded-lg">{error}</div>;
 
         switch (view) {
             case 'dashboard': return <DashboardView 
                                         subscribers={subscribers} 
-                                        currentUser={currentUser}
+                                        currentUser={currentUser!}
                                         setView={setView}
                                         setFilter={setSubscriberFilter}
                                     />;
@@ -163,7 +240,7 @@ const App: React.FC = () => {
                                     onDelete={handleDeleteStaff}
                                   />;
             case 'settings': return <SettingsView />;
-            case 'profile': return <ProfileView currentUser={currentUser} />;
+            case 'profile': return <ProfileView currentUser={currentUser!} />;
             case 'productSpec': return <SpecView data={executiveSummary} />;
             case 'mvp': return <SpecView data={{...prioritizedFeatures, ...mvpDefinition, title: "Features & MVP Definition"}} />;
             case 'dataModel': return <SpecView data={dataModel} />;
@@ -173,11 +250,44 @@ const App: React.FC = () => {
             case 'roadmap': return <SpecView data={roadmap} />;
             default: return <DashboardView 
                                 subscribers={subscribers} 
-                                currentUser={currentUser}
+                                currentUser={currentUser!}
                                 setView={setView}
                                 setFilter={setSubscriberFilter}
                              />;
         }
+    }
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
+                <div className="text-xl font-medium text-slate-700 dark:text-slate-300">
+                    Loading Application...
+                </div>
+            </div>
+        );
+    }
+    
+    if (error) {
+       return (
+            <div className="flex items-center justify-center h-screen bg-red-100 dark:bg-red-900/50">
+                <div className="p-10 text-center text-red-500 border border-red-500 rounded-lg">
+                    <h2 className="text-2xl font-bold mb-4">Error</h2>
+                    <p>{error}</p>
+                    <p className="mt-4 text-sm">Please ensure the backend server is running on `http://localhost:3001`.</p>
+                </div>
+            </div>
+       );
+    }
+
+    if (!currentUser) {
+        // This should be caught by the error handler, but it's a good safeguard
+        return (
+             <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
+                <div className="text-xl font-medium text-red-700 dark:text-red-300">
+                    No current user could be loaded.
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -191,6 +301,8 @@ const App: React.FC = () => {
                         theme={theme}
                         currentUser={currentUser}
                         setView={setView}
+                        expiringSubscribers={expiringSubscribers}
+                        setSubscriberFilter={setSubscriberFilter}
                     />
                     <main>
                         <div className="mx-auto max-w-screen-2xl p-4 md:p-6 2xl:p-10">
