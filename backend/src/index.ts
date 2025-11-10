@@ -136,9 +136,11 @@ const authenticateToken = (req: AuthRequest, res: express.Response, next: expres
     });
 };
 
-// --- SUBSCRIBERS API ---
+// =================================================================
+// --- SUBSCRIBERS API (Now Protected) ---
+// =================================================================
 
-app.get('/api/subscribers', async (req, res) => {
+app.get('/api/subscribers', authenticateToken, async (req, res) => {
   try {
     const subscribers = await prisma.subscriber.findMany({
       orderBy: { createdAt: 'desc' },
@@ -150,9 +152,10 @@ app.get('/api/subscribers', async (req, res) => {
   }
 });
 
-app.post('/api/subscribers', async (req, res) => {
+app.post('/api/subscribers', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { fullName, email, phoneNumber, plan, startDate, status, notes, createdById } = req.body;
+    const { fullName, email, phoneNumber, plan, startDate, status, notes } = req.body;
+    const createdById = req.user?.userId; // Get user ID from the token
     
     const planEnum = planMap[plan as string];
     if (!planEnum) {
@@ -193,7 +196,7 @@ app.post('/api/subscribers', async (req, res) => {
   }
 });
 
-app.put('/api/subscribers/:id', async (req, res) => {
+app.put('/api/subscribers/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const { fullName, email, phoneNumber, plan, startDate, status, notes } = req.body;
@@ -237,7 +240,7 @@ app.put('/api/subscribers/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/subscribers/:id', async (req, res) => {
+app.delete('/api/subscribers/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     await prisma.communication.deleteMany({ where: { subscriberId: id } });
@@ -255,14 +258,17 @@ app.delete('/api/subscribers/:id', async (req, res) => {
 });
 
 
-// --- STAFF API ---
+// =================================================================
+// --- STAFF API (Now Protected & Fixed) ---
+// =================================================================
+
 const transformUserForClient = (user: any) => ({
     ...user,
     lastLogin: new Date().toISOString(),
     avatar: user.avatar || `https://i.pravatar.cc/150?u=${user.email}`,
 });
 
-app.get('/api/staff', async (req, res) => {
+app.get('/api/staff', authenticateToken, async (req, res) => {
   try {
     const staff = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
@@ -273,15 +279,28 @@ app.get('/api/staff', async (req, res) => {
   }
 });
 
-app.post('/api/staff', async (req, res) => {
+app.post('/api/staff', authenticateToken, async (req: AuthRequest, res) => {
+  // Check if the authenticated user is an ADMIN
+  const adminUser = await prisma.user.findUnique({ where: { id: req.user?.userId } });
+  if (adminUser?.role !== Role.ADMIN) {
+      return res.status(403).json({ error: 'Only admins can create users.' });
+  }
+
   try {
-    const { name, email, role } = req.body;
+    const { name, email, role, password } = req.body;
+
+    if (!password) {
+        return res.status(400).json({ error: 'Password is required to create a user.'});
+    }
+
+    const hashedPassword = await hash(password); // <-- Hash the password
+
     const newUser = await prisma.user.create({
       data: {
         name,
         email,
         role: (role as string).toUpperCase() as Role,
-        password: 'password_placeholder', // Should be properly hashed
+        password: hashedPassword, // Save the hashed password
         avatar: `https://i.pravatar.cc/150?u=${email}`
       },
     });
@@ -291,7 +310,7 @@ app.post('/api/staff', async (req, res) => {
   }
 });
 
-app.put('/api/staff/:id', async (req, res) => {
+app.put('/api/staff/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const { name, email, role } = req.body;
@@ -309,22 +328,80 @@ app.put('/api/staff/:id', async (req, res) => {
   }
 });
 
+app.delete('/api/staff/:id', authenticateToken, async (req: AuthRequest, res) => {
+  const { id } = req.params; // ID of user to delete
+  const requestingUserId = req.user?.userId; // ID of admin making the request
 
-app.delete('/api/staff/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        await prisma.auditLog.deleteMany({ where: { userId: id }});
-
-        await prisma.user.delete({
-            where: { id },
+  try {
+    // We use a transaction to ensure all operations succeed or none do.
+    // If any step throws an error, the entire transaction is rolled back.
+    const deleteResult = await prisma.$transaction(async (tx) => {
+        
+        // 1. Verify the person making the request is an Admin
+        const requestingUser = await tx.user.findUnique({
+            where: { id: requestingUserId },
         });
-        res.status(204).send();
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error deleting staff member. They may have created subscribers.' });
-    }
-});
 
+        if (requestingUser?.role !== Role.ADMIN) {
+            // This throw will cancel the transaction
+            throw new Error('Only admins can delete users.');
+        }
+
+        // 2. Prevent admin from deleting themselves
+        if (requestingUser.id === id) {
+            // This throw will cancel the transaction
+            throw new Error('Admin cannot delete their own account.');
+        }
+
+        // 3. Find the user to be deleted (to ensure they exist)
+        const userToDelete = await tx.user.findUnique({
+            where: { id: id }
+        });
+
+        if (!userToDelete) {
+            // This throw will cancel the transaction
+            throw new Error('User not found.');
+        }
+
+        // 4. Re-assign subscribers to the admin making the request
+        await tx.subscriber.updateMany({
+            where: { createdById: id },
+            data: {
+                createdById: requestingUser.id, // Re-assign to the admin
+            },
+        });
+
+        // 5. Delete associated audit logs
+        await tx.auditLog.deleteMany({
+            where: { userId: id },
+        });
+
+        // 6. Finally, delete the user
+        const deletedUser = await tx.user.delete({
+            where: { id: id },
+        });
+
+        return deletedUser;
+    });
+
+    // If the transaction was successful, send 204
+    res.status(204).send();
+
+  } catch (error: any) {
+      // Handle errors thrown from inside the transaction
+      console.error("Transaction failed: ", error.message);
+      
+      if (error.message === 'Only admins can delete users.') {
+          return res.status(403).json({ error: error.message });
+      }
+      if (error.message === 'Admin cannot delete their own account.' || error.message === 'User not found.') {
+          return res.status(400).json({ error: error.message });
+      }
+
+      // Generic error for any other transaction failure
+      res.status(500).json({ error: 'Error deleting staff member.' });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
