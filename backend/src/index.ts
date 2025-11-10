@@ -1,10 +1,28 @@
 import express from 'express';
 import cors from 'cors';
 import { PrismaClient, SubscriberStatus, Plan, Role, Subscriber } from '@prisma/client';
+import { hash, verify } from 'argon2';
+import jwt from 'jsonwebtoken';
+import { Request } from 'express';
+import 'dotenv/config';
+
+// --- Define an interface for the authenticated request ---
+interface AuthRequest extends Request {
+    user?: { userId: string; role: Role }; // Add user property
+}
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = 3001;
+
+// --- Add a JWT_SECRET ---
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// --- Add a check to make sure it loaded ---
+if (!JWT_SECRET) {
+    console.error("FATAL ERROR: JWT_SECRET is not defined in .env file");
+    process.exit(1);
+}
 
 app.use(cors());
 app.use(express.json());
@@ -50,6 +68,72 @@ const transformSubscriberForClient = (subscriber: Subscriber & { payments: any[]
         createdAt: subscriber.createdAt.toISOString(),
         updatedAt: subscriber.updatedAt.toISOString(),
     };
+};
+
+// =================================================================
+// --- NEW: AUTHENTICATION ---
+// =================================================================
+
+// --- LOGIN ENDPOINT ---
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    try {
+        const user = await prisma.user.findUnique({
+            where: { email },
+        });
+
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid email or password.' });
+        }
+
+        // Verify password with argon2
+        const isPasswordValid = await verify(user.password, password); 
+
+        if (!isPasswordValid) {
+            return res.status(401).json({ error: 'Invalid email or password.' });
+        }
+
+        // Password is valid, create a JWT
+        const token = jwt.sign(
+            { userId: user.id, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '8h' } // Token expires in 8 hours
+        );
+
+        // Don't send the password back
+        const { password: _, ...userWithoutPassword } = user;
+
+        // Use the existing transformUserForClient
+        res.json({ token, user: transformUserForClient(userWithoutPassword) });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Login failed.' });
+    }
+});
+
+// --- AUTHENTICATION MIDDLEWARE ---
+const authenticateToken = (req: AuthRequest, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Format: "Bearer TOKEN"
+
+    if (token == null) {
+        return res.status(401).json({ error: 'No token provided' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+        if (err) {
+            console.log(err);
+            return res.status(403).json({ error: 'Token is invalid' });
+        }
+        req.user = user; // Add decoded user info to the request object
+        next();
+    });
 };
 
 // --- SUBSCRIBERS API ---
