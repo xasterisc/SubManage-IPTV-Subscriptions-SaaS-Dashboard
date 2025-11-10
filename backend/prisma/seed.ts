@@ -45,6 +45,7 @@ async function main() {
                 name: staffUser.name,
                 role: roleMap[staffUser.role] || Role.SUPPORT,
                 avatar: staffUser.avatar,
+                password: hashedPassword,
             },
             create: {
                 id: staffUser.id,

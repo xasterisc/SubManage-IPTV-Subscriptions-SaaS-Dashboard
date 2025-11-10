@@ -349,7 +349,7 @@ const App: React.FC = () => {
         <div className="dark:bg-slate-900 dark:text-slate-300 text-slate-800">
             {errorBanner}
             <div className="flex h-screen overflow-hidden">
-                <Sidebar currentView={view} setView={setView} collapsed={collapsed} setCollapsed={setCollapsed} />
+                <Sidebar currentView={view} setView={setView} collapsed={collapsed} setCollapsed={setCollapsed} onLogout={handleLogout} />
                 <div className="relative flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
                     <Header 
                         toggleSidebar={() => setCollapsed(!collapsed)} 
