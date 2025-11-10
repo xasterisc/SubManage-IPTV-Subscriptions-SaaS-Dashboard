@@ -1,10 +1,11 @@
 import { PrismaClient, Plan, Role, SubscriberStatus } from '@prisma/client';
 import { SUBSCRIBERS_DATA, STAFF_USERS_DATA } from './mockData';
-import { Subscriber, StaffUser, SubscriberStatus as FrontendSubscriberStatus, Role as FrontendRole } from './types'; // Import types for type safety
+import { Subscriber, StaffUser, SubscriberStatus as FrontendSubscriberStatus, Role as FrontendRole } from './types';
+import { hash } from 'argon2';
 
 const prisma = new PrismaClient();
 
-// --- Data Mapping Utilities (from backend/src/index.ts) ---
+// --- Data Mapping Utilities ---
 const planMap: { [key: string]: Plan } = {
     '1m': Plan.ONE_MONTH,
     '3m': Plan.THREE_MONTHS,
@@ -18,7 +19,7 @@ const roleMap: { [key in FrontendRole]: Role } = {
     [FrontendRole.Support]: Role.SUPPORT,
 };
 
-// **FIX:** Add the missing map for SubscriberStatus
+// Add map for SubscriberStatus
 const statusMap: { [key in FrontendSubscriberStatus]: SubscriberStatus } = {
     [FrontendSubscriberStatus.Active]: SubscriberStatus.ACTIVE,
     [FrontendSubscriberStatus.Expiring]: SubscriberStatus.EXPIRING,
@@ -32,23 +33,25 @@ async function main() {
     console.log(`Start seeding ...`);
 
     // --- Seed Staff Users ---
-    // Use `upsert` to avoid creating duplicate users if the seed is run multiple times.
-    // We'll use email as the unique identifier.
     for (const user of STAFF_USERS_DATA) {
         const staffUser = user as StaffUser; // Ensure type
+
+        // Hash the password using argon2
+        const hashedPassword = await hash('password_placeholder_123');
+
         const dbUser = await prisma.user.upsert({
             where: { email: staffUser.email },
             update: {
                 name: staffUser.name,
                 role: roleMap[staffUser.role] || Role.SUPPORT,
                 avatar: staffUser.avatar,
+                password: hashedPassword,
             },
             create: {
                 id: staffUser.id,
                 email: staffUser.email,
                 name: staffUser.name,
-                // In a real app, this should be a securely hashed password
-                password: 'password_placeholder_123',
+                password: hashedPassword,
                 role: roleMap[staffUser.role] || Role.SUPPORT,
                 avatar: staffUser.avatar,
             },
@@ -67,9 +70,8 @@ async function main() {
     }
 
     // --- Seed Subscribers ---
-    // We also `upsert` subscribers based on their email.
     for (const sub of SUBSCRIBERS_DATA) {
-        const subscriber = sub as Subscriber; // Ensure type
+        const subscriber = sub as Subscriber;
         const dbSub = await prisma.subscriber.upsert({
             where: { email: subscriber.email },
             update: {
@@ -78,7 +80,6 @@ async function main() {
                 plan: planMap[subscriber.plan] || Plan.ONE_MONTH,
                 startDate: new Date(subscriber.startDate),
                 endDate: new Date(subscriber.endDate),
-                // **FIX:** Use the statusMap to convert the string to the Prisma enum
                 status: statusMap[subscriber.status] || SubscriberStatus.CANCELLED,
                 notes: subscriber.notes,
             },
@@ -90,10 +91,9 @@ async function main() {
                 plan: planMap[subscriber.plan] || Plan.ONE_MONTH,
                 startDate: new Date(subscriber.startDate),
                 endDate: new Date(subscriber.endDate),
-                 // **FIX:** Use the statusMap to convert the string to the Prisma enum
                 status: statusMap[subscriber.status] || SubscriberStatus.CANCELLED,
                 notes: subscriber.notes,
-                createdById: adminUser.id, // Assign to our admin user
+                createdById: adminUser.id,
             },
         });
         console.log(`Created or updated subscriber: ${dbSub.fullName} (ID: ${dbSub.id})`);

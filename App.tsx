@@ -10,38 +10,80 @@ import StaffView from './components/StaffView';
 import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import SpecView from './components/SpecView';
+import LoginPage from './components/LoginPage';
 
 import { executiveSummary, prioritizedFeatures, mvpDefinition, dataModel, apiSpecification, integrations, securityAndCompliance, roadmap } from './constants/specData';
 import { GoogleGenAI } from '@google/genai';
 
 const API_BASE_URL = 'http://localhost:3001/api';
 
+// --- Create an API helper ---
+// This will automatically add our token to every request
+const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const token = localStorage.getItem('token');
+
+    const headers = new Headers(options.headers || {});
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+    if (!headers.has('Content-Type') && options.body) {
+        headers.set('Content-Type', 'application/json');
+    }
+
+    const res = await fetch(`${API_BASE_URL}${url}`, {
+        ...options,
+        headers,
+    });
+
+    if (res.status === 401) {
+        // Auto-logout if token is bad
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.reload(); // Easiest way to reset state
+        throw new Error('Session expired');
+    }
+
+    return res;
+};
+
+
 const App: React.FC = () => {
     const [view, setView] = useState<View>('dashboard');
     const [collapsed, setCollapsed] = useState(false);
     const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
+    // --- Auth State ---
+    const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem('token'));
+    const [currentUser, setCurrentUser] = useState<StaffUser | null>(() => {
+        const storedUser = localStorage.getItem('user');
+        return storedUser ? JSON.parse(storedUser) : null;
+    });
+
     const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
     const [staff, setStaff] = useState<StaffUser[]>([]);
     const [subscriberFilter, setSubscriberFilter] = useState<SubscriberFilter>('all');
-    
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    
-    const [currentUser, setCurrentUser] = useState<StaffUser | null>(null);
 
     useEffect(() => {
         const fetchData = async () => {
+            if (!authToken) {
+                setLoading(false);
+                return; // Don't fetch data if no token
+            }
+
             setLoading(true);
             setError(null);
             try {
+                // Use our new apiFetch helper
                 const [subscribersRes, staffRes] = await Promise.all([
-                    fetch(`${API_BASE_URL}/subscribers`),
-                    fetch(`${API_BASE_URL}/staff`)
+                    apiFetch('/subscribers'),
+                    apiFetch('/staff')
                 ]);
 
                 if (!subscribersRes.ok || !staffRes.ok) {
-                    throw new Error('Failed to fetch data from the server. Is the backend running?');
+                    throw new Error('Failed to fetch data from the server.');
                 }
 
                 const subscribersData = await subscribersRes.json();
@@ -50,10 +92,13 @@ const App: React.FC = () => {
                 setSubscribers(subscribersData);
                 setStaff(staffData);
 
-                if (staffData.length > 0) {
-                    setCurrentUser(staffData[0]);
+                // Re-confirm current user from stored data
+                const storedUser = localStorage.getItem('user');
+                if (storedUser) {
+                    setCurrentUser(JSON.parse(storedUser));
                 } else {
-                    setError("No staff users found in the database. App cannot start.");
+                    // This should not happen if login is successful, but good fallback
+                    handleLogout();
                 }
 
             } catch (err: any) {
@@ -65,7 +110,7 @@ const App: React.FC = () => {
         };
 
         fetchData();
-    }, []); // The empty array [] means this runs once on mount
+    }, [authToken]); // <-- Re-run when authToken changes
 
     useEffect(() => {
         // Theme initialization
@@ -90,23 +135,39 @@ const App: React.FC = () => {
         }
     };
 
-    // --- Subscriber Handlers ---
+    // --- New Auth Handlers ---
+    const handleLogin = (token: string, user: StaffUser) => {
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user)); // Store user details
+        setAuthToken(token);
+        setCurrentUser(user);
+    };
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setAuthToken(null);
+        setCurrentUser(null);
+        setSubscribers([]); // Clear data
+        setStaff([]);
+    };
+
+    // --- Subscriber Handlers (use apiFetch) ---
     const handleAddSubscriber = async (subscriber: Subscriber) => {
         if (!currentUser) return;
-        
+
         const subscriberData = {
             ...subscriber,
-            createdById: currentUser.id,
+            createdById: currentUser.id, // This is now set on the backend, but good to have
         };
 
         try {
-            const res = await fetch(`${API_BASE_URL}/subscribers`, {
+            const res = await apiFetch('/subscribers', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(subscriberData),
             });
             if (!res.ok) throw new Error('Failed to create subscriber.');
-            
+
             const newSubscriber = await res.json();
             setSubscribers(prev => [newSubscriber, ...prev]);
         } catch (err: any) {
@@ -116,43 +177,60 @@ const App: React.FC = () => {
 
     const handleUpdateSubscriber = async (subscriber: Subscriber) => {
         try {
-            const res = await fetch(`${API_BASE_URL}/subscribers/${subscriber.id}`, {
+            const res = await apiFetch(`/subscribers/${subscriber.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(subscriber),
             });
             if (!res.ok) throw new Error('Failed to update subscriber.');
-            
+
             const updatedSubscriber = await res.json();
             setSubscribers(prev => prev.map(s => s.id === updatedSubscriber.id ? updatedSubscriber : s));
         } catch (err: any) {
             setError(err.message);
         }
     };
-    
+
     const handleDeleteSubscribers = async (ids: string[]) => {
         try {
-            await Promise.all(ids.map(id => 
-                fetch(`${API_BASE_URL}/subscribers/${id}`, {
+          // 1. Wait for all API calls to complete
+            const responses = await Promise.all(ids.map(id => 
+                apiFetch(`/subscribers/${id}`, {
                     method: 'DELETE',
                 })
             ));
-            
+
+            // 2. Check if any of the requests failed
+            for (const res of responses) {
+                if (!res.ok) {
+                    // If a request failed (e.g., 403 Forbidden),
+                    // get the error message from the backend and throw it.
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || `Failed to delete subscriber (status: ${res.status})`);
+                }
+            }
+
+            // 3. Only if ALL requests were successful, update the UI state
             setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
+
         } catch (err: any) {
-            setError(`Failed to delete subscribers: ${err.message}`);
+            // 4. The catch block will now receive the error we threw,
+            // (e.g., "Only admins can delete subscribers.")
+            // and the 'errorBanner' will display it.
+            setError(err.message);
         }
     };
-    
-    // --- Staff Handlers ---
+
+    // --- Staff Handlers (use apiFetch) ---
     const handleAddStaff = async (staffMember: StaffUser) => {
         try {
-            const res = await fetch(`${API_BASE_URL}/staff`, {
+            const res = await apiFetch('/staff', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(staffMember),
             });
-            if (!res.ok) throw new Error('Failed to add staff member.');
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Failed to add staff member.');
+            }
 
             const newStaff = await res.json();
             setStaff(prev => [newStaff, ...prev]);
@@ -162,14 +240,13 @@ const App: React.FC = () => {
     };
 
     const handleUpdateStaff = async (staffMember: StaffUser) => {
-         try {
-            const res = await fetch(`${API_BASE_URL}/staff/${staffMember.id}`, {
+        try {
+            const res = await apiFetch(`/staff/${staffMember.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(staffMember),
             });
             if (!res.ok) throw new Error('Failed to update staff member.');
-            
+
             const updatedStaff = await res.json();
             setStaff(prev => prev.map(s => s.id === updatedStaff.id ? updatedStaff : s));
         } catch (err: any) {
@@ -179,7 +256,7 @@ const App: React.FC = () => {
 
     const handleDeleteStaff = async (id: string) => {
         try {
-            const res = await fetch(`${API_BASE_URL}/staff/${id}`, {
+            const res = await apiFetch(`/staff/${id}`, {
                 method: 'DELETE',
             });
             if (!res.ok) throw new Error('Failed to delete staff member.');
@@ -195,13 +272,13 @@ const App: React.FC = () => {
         if (!notes.trim()) {
             return "No notes provided to summarize.";
         }
-        
+
         try {
             const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
             const prompt = `Summarize these customer notes for a support agent in one or two sentences. Keep it concise and actionable:\n\n---\n${notes}\n---`;
             const response = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
-              contents: prompt,
+            model: 'gemini-2.5-flash',
+            contents: prompt,
             });
             return response.text;
         } catch (e) {
@@ -216,7 +293,7 @@ const App: React.FC = () => {
     }, [subscribers]);
 
     const renderView = () => {
-
+        // ... (no change here)
         switch (view) {
             case 'dashboard': return <DashboardView 
                                         subscribers={subscribers} 
@@ -232,13 +309,13 @@ const App: React.FC = () => {
                                         onSummarize={handleSummarizeNotes}
                                         filter={subscriberFilter}
                                         setFilter={setSubscriberFilter}
-                                      />;
+                                    />;
             case 'staff': return <StaffView 
                                     staff={staff} 
                                     onAdd={handleAddStaff}
                                     onUpdate={handleUpdateStaff}
                                     onDelete={handleDeleteStaff}
-                                  />;
+                                />;
             case 'settings': return <SettingsView />;
             case 'profile': return <ProfileView currentUser={currentUser!} />;
             case 'productSpec': return <SpecView data={executiveSummary} />;
@@ -253,11 +330,11 @@ const App: React.FC = () => {
                                 currentUser={currentUser!}
                                 setView={setView}
                                 setFilter={setSubscriberFilter}
-                             />;
+                            />;
         }
     }
 
-    if (loading) {
+    if (loading && !currentUser) { // Show loading only on initial auth/data load
         return (
             <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
                 <div className="text-xl font-medium text-slate-700 dark:text-slate-300">
@@ -266,34 +343,29 @@ const App: React.FC = () => {
             </div>
         );
     }
-    
-    if (error) {
-       return (
-            <div className="flex items-center justify-center h-screen bg-red-100 dark:bg-red-900/50">
-                <div className="p-10 text-center text-red-500 border border-red-500 rounded-lg">
-                    <h2 className="text-2xl font-bold mb-4">Error</h2>
-                    <p>{error}</p>
-                    <p className="mt-4 text-sm">Please ensure the backend server is running on `http://localhost:3001`.</p>
-                </div>
-            </div>
-       );
+
+    // --- Render Login Page if no token ---
+    if (!authToken || !currentUser) {
+        return <LoginPage onLogin={handleLogin} setError={(err) => {
+            setError(err);
+            setTimeout(() => setError(null), 5000); // Clear error after 5s
+        }} />;
     }
 
-    if (!currentUser) {
-        // This should be caught by the error handler, but it's a good safeguard
-        return (
-             <div className="flex items-center justify-center h-screen bg-slate-100 dark:bg-slate-900">
-                <div className="text-xl font-medium text-red-700 dark:text-red-300">
-                    No current user could be loaded.
-                </div>
-            </div>
-        );
-    }
+    // Show error overlay if one exists
+    const errorBanner = error ? (
+        <div className="fixed top-5 right-5 z-[100] bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+            <strong className="font-bold">Error: </strong>
+            <span className="block sm:inline">{error}</span>
+        </div>
+    ) : null;
+
 
     return (
         <div className="dark:bg-slate-900 dark:text-slate-300 text-slate-800">
+            {errorBanner}
             <div className="flex h-screen overflow-hidden">
-                <Sidebar currentView={view} setView={setView} collapsed={collapsed} setCollapsed={setCollapsed} />
+                <Sidebar currentView={view} setView={setView} collapsed={collapsed} setCollapsed={setCollapsed} onLogout={handleLogout} />
                 <div className="relative flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
                     <Header 
                         toggleSidebar={() => setCollapsed(!collapsed)} 
@@ -303,6 +375,7 @@ const App: React.FC = () => {
                         setView={setView}
                         expiringSubscribers={expiringSubscribers}
                         setSubscriberFilter={setSubscriberFilter}
+                        onLogout={handleLogout} // <-- Pass the logout handler
                     />
                     <main>
                         <div className="mx-auto max-w-screen-2xl p-4 md:p-6 2xl:p-10">

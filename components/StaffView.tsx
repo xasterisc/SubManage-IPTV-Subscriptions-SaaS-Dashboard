@@ -16,57 +16,75 @@ const RoleBadge: React.FC<{ role: Role }> = ({ role }) => (
 const inputStyles = "mt-1 block w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm";
 
 const StaffModal: React.FC<{ user: StaffUser | null; onClose: () => void; onSave: (user: StaffUser) => void; }> = ({ user, onClose, onSave }) => {
-    const [formData, setFormData] = useState<Partial<StaffUser>>(user || { name: '', email: '', role: Role.Support });
-    const isNew = !user;
+  // Add password to the form state, but only for the 'add' modal
+  const [formData, setFormData] = useState<Partial<StaffUser> & { password?: string }>(user || { name: '', email: '', role: Role.Support, password: '' });
+  const isNew = !user;
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({...prev, [name]: value }));
-    };
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const { name, value } = e.target;
+      setFormData(prev => ({...prev, [name]: value }));
+  };
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!formData.name || !formData.email) {
-            alert('Name and Email are required.');
-            return;
-        }
-        onSave({ ...user, ...formData } as StaffUser);
-    };
+  const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!formData.name || !formData.email) {
+          alert('Name and Email are required.');
+          return;
+      }
+      if (isNew && !formData.password) {
+          alert('Password is required for new users.');
+          return;
+      }
+      onSave({ ...user, ...formData } as StaffUser);
+  };
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={onClose}>
-            <div className="relative bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
-                <div className="flex justify-between items-center p-4 border-b dark:border-slate-700">
-                    <h2 className="text-xl font-semibold text-slate-800 dark:text-white">{isNew ? 'Add Staff User' : 'Edit Staff User'}</h2>
-                    <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
-                        <CloseIcon className="w-6 h-6 text-slate-500" />
-                    </button>
-                </div>
-                <form onSubmit={handleSubmit}>
-                    <div className="p-6 space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium">Full Name</label>
-                            <input name="name" value={formData.name} onChange={handleChange} className={inputStyles} required />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium">Email</label>
-                            <input name="email" type="email" value={formData.email} onChange={handleChange} className={inputStyles} required />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium">Role</label>
-                            <select name="role" value={formData.role} onChange={handleChange} className={inputStyles}>
-                                {Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                    <div className="flex justify-end p-4 bg-slate-50 dark:bg-slate-800/50 border-t dark:border-slate-700 rounded-b-lg">
-                        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 mr-2">Cancel</button>
-                        <button type="submit" className="px-4 py-2 rounded-lg bg-sky-600 text-white hover:bg-sky-700">Save User</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
+  return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={onClose}>
+          <div className="relative bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center p-4 border-b dark:border-slate-700">
+                  <h2 className="text-xl font-semibold text-slate-800 dark:text-white">{isNew ? 'Add Staff User' : 'Edit Staff User'}</h2>
+                  <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
+                      <CloseIcon className="w-6 h-6 text-slate-500" />
+                  </button>
+              </div>
+              <form onSubmit={handleSubmit}>
+                  <div className="p-6 space-y-4">
+                      <div>
+                          <label className="block text-sm font-medium">Full Name</label>
+                          <input name="name" value={formData.name} onChange={handleChange} className={inputStyles} required />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium">Email</label>
+                          <input name="email" type="email" value={formData.email} onChange={handleChange} className={inputStyles} required />
+                      </div>
+                      {isNew && (
+                          <div>
+                              <label className="block text-sm font-medium">Password</label>
+                              <input 
+                                  name="password" 
+                                  type="password" 
+                                  value={formData.password} 
+                                  onChange={handleChange} 
+                                  className={inputStyles} 
+                                  required 
+                              />
+                          </div>
+                      )}
+                      <div>
+                          <label className="block text-sm font-medium">Role</label>
+                          <select name="role" value={formData.role} onChange={handleChange} className={inputStyles}>
+                              {Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                      </div>
+                  </div>
+                  <div className="flex justify-end p-4 bg-slate-50 dark:bg-slate-800/50 border-t dark:border-slate-700 rounded-b-lg">
+                      <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 mr-2">Cancel</button>
+                      <button type="submit" className="px-4 py-2 rounded-lg bg-sky-600 text-white hover:bg-sky-700">Save User</button>
+                  </div>
+              </form>
+          </div>
+      </div>
+  );
 };
 
 

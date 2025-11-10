@@ -10,6 +10,7 @@ interface HeaderProps {
     setView: (view: View) => void;
     expiringSubscribers: Subscriber[];
     setSubscriberFilter: (filter: SubscriberFilter) => void;
+    onLogout: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ 
@@ -19,7 +20,8 @@ const Header: React.FC<HeaderProps> = ({
     currentUser, 
     setView,
     expiringSubscribers,
-    setSubscriberFilter
+    setSubscriberFilter,
+    onLogout
 }) => {
     const [profileOpen, setProfileOpen] = useState(false);
     const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -158,7 +160,7 @@ const Header: React.FC<HeaderProps> = ({
                                         </a>
                                     </li>
                                 </ul>
-                                <button className="flex items-center gap-3.5 px-6 py-4 text-sm font-medium duration-300 ease-in-out hover:text-sky-500">
+                                <button onClick={onLogout} className="flex items-center gap-3.5 px-6 py-4 text-sm font-medium duration-300 ease-in-out hover:text-sky-500">
                                     <LogoutIcon className="w-6 h-6"/>
                                     Log Out
                                 </button>

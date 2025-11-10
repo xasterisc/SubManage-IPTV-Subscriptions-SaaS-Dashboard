@@ -7,6 +7,7 @@ interface SidebarProps {
   setView: (view: View) => void;
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
+  onLogout: () => void;
 }
 
 const NavItem: React.FC<{
@@ -74,7 +75,7 @@ const NavGroup: React.FC<{
     )
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, collapsed }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, collapsed, onLogout }) => {
     const specViews: View[] = ['productSpec', 'mvp', 'dataModel', 'api', 'integrations', 'security', 'roadmap'];
   
   return (
@@ -115,13 +116,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, collapsed }) =>
                 <NavItem viewName="settings" currentView={currentView} setView={setView} icon={<CogIcon className="w-6 h-6" />} label="Settings" collapsed={collapsed} />
                 <NavItem viewName="profile" currentView={currentView} setView={setView} icon={<UserCircleIcon className="w-6 h-6" />} label="Profile" collapsed={collapsed} />
                  <li>
-                    <a href="#" onClick={(e) => e.preventDefault()}
+                    <button
+                        onClick={onLogout}
                         className={`flex items-center p-2 text-base rounded-lg transition-colors duration-200 group text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 ${collapsed ? 'justify-center' : ''}`}
                         title={collapsed ? 'Logout' : undefined}
                     >
                        <LogoutIcon className="w-6 h-6" />
                        <span className={`ml-3 whitespace-nowrap ${collapsed ? 'hidden' : ''}`}>Logout</span>
-                    </a>
+                    </button>
                 </li>
             </ul>
         </div>
