@@ -192,15 +192,31 @@ const App: React.FC = () => {
 
     const handleDeleteSubscribers = async (ids: string[]) => {
         try {
-            await Promise.all(ids.map(id => 
+          // 1. Wait for all API calls to complete
+            const responses = await Promise.all(ids.map(id => 
                 apiFetch(`/subscribers/${id}`, {
                     method: 'DELETE',
                 })
             ));
 
+            // 2. Check if any of the requests failed
+            for (const res of responses) {
+                if (!res.ok) {
+                    // If a request failed (e.g., 403 Forbidden),
+                    // get the error message from the backend and throw it.
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || `Failed to delete subscriber (status: ${res.status})`);
+                }
+            }
+
+            // 3. Only if ALL requests were successful, update the UI state
             setSubscribers(prev => prev.filter(s => !ids.includes(s.id!)));
+
         } catch (err: any) {
-            setError(`Failed to delete subscribers: ${err.message}`);
+            // 4. The catch block will now receive the error we threw,
+            // (e.g., "Only admins can delete subscribers.")
+            // and the 'errorBanner' will display it.
+            setError(err.message);
         }
     };
 
