@@ -240,9 +240,19 @@ app.put('/api/subscribers/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/subscribers/:id', authenticateToken, async (req, res) => {
+app.delete('/api/subscribers/:id', authenticateToken, async (req: AuthRequest, res) => {
   const { id } = req.params;
   try {
+    // --- Add this Admin Check ---
+    const requestingUser = await prisma.user.findUnique({ 
+        where: { id: req.user?.userId } 
+    });
+
+    if (requestingUser?.role !== Role.ADMIN) {
+        return res.status(403).json({ error: 'Only admins can delete subscribers.' });
+    }
+    // --- End of Admin Check ---
+
     await prisma.communication.deleteMany({ where: { subscriberId: id } });
     await prisma.payment.deleteMany({ where: { subscriberId: id } });
     await prisma.auditLog.deleteMany({ where: { subscriberId: id }});
